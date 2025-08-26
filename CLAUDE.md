@@ -69,5 +69,18 @@ mv vosk-model-small-en-us-0.15 model
 - `begin_end_commands/`: Custom start/finish commands  
 - `vosk_grammar/`: Grammar-restricted recognition
 - `language_tool_auto_grammar/`: Grammar integration
+- `llm_post_processing/`: LLM-powered grammar correction and software development optimization
 
 **Text Processing**: Core functionality includes number-to-digit conversion, punctuation handling, and user-defined text manipulation through configuration scripts.
+
+## Development Workflow for LLM Configuration
+
+When working with the LLM post-processing configuration:
+
+1. **Active Development**: Make changes in `~/.config/nerd-dictation/nerd-dictation.py` for immediate testing
+2. **Testing**: Use existing dictation shortcuts - changes are applied immediately 
+3. **After Each Iteration**: Copy the working configuration to the repository:
+   ```bash
+   cp ~/.config/nerd-dictation/nerd-dictation.py examples/llm_post_processing/nerd-dictation.py
+   ```
+4. **Commit Changes**: Include the updated configuration in version control
