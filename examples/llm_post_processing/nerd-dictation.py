@@ -19,7 +19,7 @@ LLM_ENABLED = True
 LLM_MIN_WORDS = 3  # Only process with LLM if text has at least this many words
 
 # Cache to prevent multiple LLM processing of the same text
-_llm_cache = {}
+_llm_cache = {}  # Cleared cache for conservative prompt
 _last_processed_text = ""
 LLM_CACHE_MAX_SIZE = 100  # Limit cache size to prevent memory issues
 
@@ -37,25 +37,32 @@ def improve_text_with_llm(text: str) -> str:
     if text in _llm_cache:
         return _llm_cache[text]
     
-    prompt = f"""Fix grammar errors and pronunciation mistakes in this software development dictated text. Pay attention to:
-- Technical terminology and proper capitalization
-- Programming-related grammar patterns  
-- Code-related context and meaning
-- Common speech recognition errors in tech terms
+    prompt = f"""Fix only obvious grammar errors in this dictated text. Make minimal changes and preserve all original words and meaning.
 
-Return ONLY the corrected text with no explanations, notes, or commentary.
+ONLY fix these clear errors:
+- Subject-verb disagreement: "this are" -> "this is", "we was" -> "we were"  
+- Obvious homophones: "by groceries" -> "buy groceries", "there car" -> "their car"
+- Missing capitalization at start of sentence
 
-Input: {text}
-Output:"""
+NEVER change:
+- Technical terms or proper nouns
+- Word order or sentence structure  
+- Programming terminology
+- Any word that could be correct
+
+Return the same text with only the minimal necessary fixes.
+
+Text: {text}
+Fixed:"""
     
     data = {
         "model": OLLAMA_MODEL,
         "prompt": prompt,
         "stream": False,
         "options": {
-            "temperature": 0.1,  # Low temperature for consistent corrections
-            "top_p": 0.9,
-            "num_predict": 256,  # Limit response length
+            "temperature": 0.01,  # Extremely low temperature for conservative corrections
+            "top_p": 0.7,
+            "num_predict": 128,  # Shorter responses to prevent over-elaboration
         }
     }
     
