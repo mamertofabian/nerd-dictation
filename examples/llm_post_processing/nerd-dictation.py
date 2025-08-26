@@ -5,6 +5,7 @@ import re
 import requests
 import json
 import sys
+import time
 
 # -----------------------------------------------------------------------------
 # LLM Post-Processing Configuration
@@ -23,34 +24,71 @@ _llm_cache = {}  # Cleared cache for conservative prompt
 _last_processed_text = ""
 LLM_CACHE_MAX_SIZE = 100  # Limit cache size to prevent memory issues
 
+# Debouncing to prevent rapid LLM calls
+_last_llm_call_time = 0
+LLM_DEBOUNCE_DELAY = 0.3  # 300ms minimum between LLM calls
+
+# Progressive text detection
+_last_llm_processed_text = ""
+MIN_TEXT_LENGTH_FOR_LLM = 15  # Minimum characters before considering LLM processing
+
+def should_process_with_llm(text: str) -> bool:
+    """Determine if text should be processed with LLM"""
+    global _last_llm_processed_text
+    
+    # Skip very short text
+    if len(text.split()) < LLM_MIN_WORDS or len(text) < MIN_TEXT_LENGTH_FOR_LLM:
+        return False
+    
+    # Skip if this looks like progressive typing of previously processed text
+    if _last_llm_processed_text and text.startswith(_last_llm_processed_text.rstrip('.,!?')):
+        # This appears to be an extension of previously processed text
+        return False
+    
+    # Skip if this looks like a substring of what we just processed
+    if _last_llm_processed_text and _last_llm_processed_text.startswith(text.rstrip('.,!?')):
+        return False
+        
+    return True
+
 def improve_text_with_llm(text: str) -> str:
     """Send text to local Ollama for grammar correction and improvement"""
+    global _last_llm_call_time, _last_llm_processed_text
     
     if not LLM_ENABLED:
         return text
         
-    # Skip LLM processing for very short text
-    if len(text.split()) < LLM_MIN_WORDS:
+    # Check if we should process this text
+    if not should_process_with_llm(text):
         return text
+    
+    # Debouncing: prevent rapid successive LLM calls
+    current_time = time.time()
+    if current_time - _last_llm_call_time < LLM_DEBOUNCE_DELAY:
+        return text
+    _last_llm_call_time = current_time
     
     # Check cache to avoid reprocessing the same text
     if text in _llm_cache:
         return _llm_cache[text]
     
-    prompt = f"""Fix only obvious grammar errors in this dictated text. Make minimal changes and preserve all original words and meaning.
+    prompt = f"""Fix only obvious speech recognition and grammar errors. DO NOT change technical terms, proper nouns, or already correct formatting.
 
-ONLY fix these clear errors:
-- Subject-verb disagreement: "this are" -> "this is", "we was" -> "we were"  
-- Obvious homophones: "by groceries" -> "buy groceries", "there car" -> "their car"
-- Missing capitalization at start of sentence
+FIX ONLY:
+- Subject-verb disagreement: "this are" -> "this is", "we was" -> "we were"
+- Missing articles: "need file" -> "need a file"
+- Basic homophones from speech: "there going" -> "they're going", "by groceries" -> "buy groceries"
+- Missing capitalization at sentence start
+- Obvious speech recognition errors: "no" -> "know" when context is clear
 
-NEVER change:
-- Technical terms or proper nouns
-- Word order or sentence structure  
-- Programming terminology
-- Any word that could be correct
+PRESERVE COMPLETELY:
+- Technical terms: API, JSON, MySQL, backend, frontend, login, etc.
+- Programming concepts: async, await, function, class, etc.
+- Proper nouns and brand names
+- Already hyphenated terms: real-time, full-stack, etc.
+- Any word that could be technically correct
 
-Return the same text with only the minimal necessary fixes.
+Return the same text with only minimal grammar fixes.
 
 Text: {text}
 Fixed:"""
@@ -100,7 +138,9 @@ Fixed:"""
                     # Log the improvement to stderr for debugging (optional)
                     if improved_text != text:
                         print(f"LLM improved: '{text}' → '{improved_text}'", file=sys.stderr)
-                        
+                    
+                    # Update last processed text tracking
+                    _last_llm_processed_text = improved_text
                     return improved_text
                 else:
                     # Validation failed, fall back to original text
@@ -524,12 +564,24 @@ CODE_PATTERNS = {
 
 def nerd_dictation_process(text: str) -> str:
     """
-    Main text processing function that integrates LLM post-processing
-    with traditional text replacement and punctuation handling.
+    Main text processing function with LLM-first architecture.
+    LLM handles grammar on raw speech, then technical corrections are applied.
     """
     global _last_processed_text
     
-    # First, apply basic text replacements (pre-LLM processing)
+    # Store original text for cache comparison
+    original_text = text
+    
+    # FIRST: Apply LLM processing to raw dictated text
+    # This prevents conflicts between LLM and technical corrections
+    if original_text != _last_processed_text and original_text.strip():
+        text = improve_text_with_llm(text)
+        _last_processed_text = original_text  # Use original for comparison
+    
+    # THEN: Apply deterministic technical corrections
+    # These won't conflict with LLM since they're applied after
+    
+    # Apply multi-word technical replacements
     for match, replacement in TEXT_REPLACE_REGEX:
         text = match.sub(replacement, text)
     
@@ -544,7 +596,7 @@ def nerd_dictation_process(text: str) -> str:
     for match, replacement in CODE_PATTERNS.items():
         text = text.replace(match, replacement)
     
-    # Apply word replacements
+    # Apply single word replacements (technical terms, capitalization)
     words = text.split(" ")
     for i, w in enumerate(words):
         w_init = w
@@ -562,11 +614,5 @@ def nerd_dictation_process(text: str) -> str:
     # Strip any words that were replaced with empty strings
     words[:] = [w for w in words if w]
     text = " ".join(words)
-    
-    # Only apply LLM processing if this is a new/different text
-    # This prevents multiple processing during progressive typing
-    if text != _last_processed_text and text.strip():
-        text = improve_text_with_llm(text)
-        _last_processed_text = text
     
     return text
