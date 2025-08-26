@@ -1,0 +1,1 @@
+/home/atomrem/.config/nerd-dictation/nerd-dictation.py
